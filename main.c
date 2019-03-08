@@ -28,6 +28,9 @@
 
 #define MAX_PACKET_SIZE 32768
 
+#define FILTERING_BY_PROCESSNAME 1
+#define PROCESS_NAME "chrome.exe"
+
 static char *format_ipaddress(uint32_t ipaddr)
 {
   static char str[16];
@@ -117,7 +120,7 @@ static void print_packet_info(PWINDIVERT_IPHDR ppIpHdr, PWINDIVERT_IPV6HDR ppIpV
 int main()
 {
   char *filter = "tcp";
-  HANDLE w_filter = WinDivertOpen(filter, WINDIVERT_LAYER_NETWORK, 0, 0);
+  HANDLE w_filter;
   WINDIVERT_ADDRESS addr;
   char packet[MAX_PACKET_SIZE];
   PVOID packet_data;
@@ -126,6 +129,9 @@ int main()
   PWINDIVERT_IPHDR ppIpHdr;
   PWINDIVERT_IPV6HDR ppIpV6Hdr;
   PWINDIVERT_TCPHDR ppTcpHdr;
+  int ports[65535] = { 0, };
+
+  w_filter = WinDivertOpen(filter, WINDIVERT_LAYER_NETWORK, 0, 0);
 
   while (1) {
     if (WinDivertRecv(w_filter, packet, sizeof(packet), &addr, &packetLen)) {
@@ -147,7 +153,22 @@ int main()
       if (ppTcpHdr == NULL)
         continue;
 
+#if FILTERING_BY_PROCESSNAME
+      if (!strcmp(PROCESS_NAME, find_processname_by_pid(
+        find_processid_by_port(ntohs(ppTcpHdr->SrcPort), ntohs(ppTcpHdr->DstPort))))) {
+
+        ports[ntohs(ppTcpHdr->SrcPort)]++;
+
+        print_packet_info(ppIpHdr, ppIpV6Hdr, ppTcpHdr);
+        for (int i = 0; i < 65535; i++)
+          if (ports[i] > 0)
+            printf(" -- %d (%d)\n", i, ports[i]);
+      }
+#else
       print_packet_info(ppIpHdr, ppIpV6Hdr, ppTcpHdr);
+#endif
+
+      WinDivertSend(w_filter, packet, packetLen, &addr, NULL);
     }
   }
 }
